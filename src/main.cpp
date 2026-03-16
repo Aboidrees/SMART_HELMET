@@ -31,6 +31,7 @@ volatile int g_batt_pct;
 bool loggingActive = false;
 String currentTestName = "test_1";
 unsigned long uploadInterval = 2000;
+bool batteryFound = false;
 
 TaskHandle_t SensorTaskHandle;
 TaskHandle_t UploadTaskHandle;
@@ -60,8 +61,10 @@ void SensorTask(void *pvParameters)
     g_red = body.redLed;
 
     // 3. قراءة البطارية (MAX17048 Fuel Gauge)
-    g_batt_v   = maxlipo.cellVoltage();
-    g_batt_pct = (int)maxlipo.cellPercent();
+    if (batteryFound) {
+      g_batt_v   = maxlipo.cellVoltage();
+      g_batt_pct = (int)maxlipo.cellPercent();
+    }
 
     delay(20); // تردد قراءة 50Hz كافٍ جداً للحساسات
   }
@@ -167,10 +170,12 @@ void setup()
     Serial.println("✅ Sensors Initialized");
   }
 
-  // تهيئة MAX17048 Fuel Gauge
-  if (!maxlipo.begin()) {
-    Serial.println("WARNING: MAX17048 not found, battery readings unavailable");
+  // تهيئة MAX17048 Fuel Gauge @ 0x36
+  batteryFound = maxlipo.begin();
+  if (!batteryFound) {
+    Serial.println("WARNING: MAX17048 not found at 0x36");
   } else {
+    maxlipo.quickStart();  // recalibrate SOC from OCV on startup
     Serial.println("✅ MAX17048 Fuel Gauge Ready");
   }
 
