@@ -59,7 +59,6 @@ volatile uint32_t g_ir, g_red;
 volatile float g_batt_v;
 volatile int g_batt_pct;
 
-bool loggingActive = false;
 String currentTestName = "test_1";
 unsigned long uploadInterval = 2000;
 bool batteryFound = false;
@@ -114,7 +113,7 @@ void UploadTask(void *pvParameters)
 {
   for (;;)
   {
-    if (loggingActive && WiFi.status() == WL_CONNECTED)
+    if (WiFi.status() == WL_CONNECTED)
     {
       HTTPClient http;
       String url = String(FIREBASE_URL) + "/" + currentTestName + "/log.json";
@@ -241,28 +240,10 @@ void setup()
   // المهمة الثانية: الرفع للإنترنت (أولوية منخفضة على النواة 1)
   xTaskCreatePinnedToCore(UploadTask, "UploadTask", 8192, NULL, 1, &UploadTaskHandle, 1);
 
-  Serial.println("READY. Type START or STOP");
+  Serial.println("✅ Logging Started");
 }
 
 void loop()
 {
-  // الـ loop سيبقى فقط لاستلام الأوامر من الـ Serial
-  if (Serial.available())
-  {
-    String cmd = Serial.readStringUntil('\n');
-    cmd.trim();
-    cmd.toUpperCase();
-
-    if (cmd == "START")
-    {
-      loggingActive = true;
-      Serial.println("🚀 Logging Started");
-    }
-    else if (cmd == "STOP")
-    {
-      loggingActive = false;
-      Serial.println("🛑 Logging Stopped");
-    }
-  }
-  delay(100);
+  delay(1000);
 }
