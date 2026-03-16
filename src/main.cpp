@@ -2,6 +2,7 @@
 #include <HTTPClient.h>
 #include <Wire.h>
 #include <Adafruit_MPU6050.h>
+#include <Adafruit_MAX1704X.h>
 #include <ArduinoJson.h>
 #include "SparkFun_Bio_Sensor_Hub_Library.h"
 
@@ -15,10 +16,9 @@ const char *FIREBASE_URL = "https://rakib-testing-default-rtdb.asia-southeast1.f
 #define SCL_PIN 22
 #define BIO_RST_PIN 25
 #define BIO_MFIO_PIN 33
-#define BAT_ADC_PIN 34 // الدبوس المخصص لقياس البطارية في LilyGo
-
 // الكائنات
 Adafruit_MPU6050 mpu;
+Adafruit_MAX17048 maxlipo;
 SparkFun_Bio_Sensor_Hub bioHub(BIO_RST_PIN, BIO_MFIO_PIN);
 
 // متغيرات عالمية (Global)
@@ -59,10 +59,9 @@ void SensorTask(void *pvParameters)
     g_ir = body.irLed;
     g_red = body.redLed;
 
-    // 3. قراءة البطارية (Fuel Gauge)
-    int rawADC = analogRead(BAT_ADC_PIN);
-    g_batt_v = (rawADC / 4095.0) * 2.0 * 3.3 * 1.1; // معادلة تحويل الجهد لـ LilyGo
-    g_batt_pct = map(constrain(g_batt_v * 100, 330, 420), 330, 420, 0, 100);
+    // 3. قراءة البطارية (MAX17048 Fuel Gauge)
+    g_batt_v   = maxlipo.cellVoltage();
+    g_batt_pct = (int)maxlipo.cellPercent();
 
     delay(20); // تردد قراءة 50Hz كافٍ جداً للحساسات
   }
@@ -168,8 +167,12 @@ void setup()
     Serial.println("✅ Sensors Initialized");
   }
 
-  // إعداد دبوس البطارية
-  analogReadResolution(12);
+  // تهيئة MAX17048 Fuel Gauge
+  if (!maxlipo.begin()) {
+    Serial.println("WARNING: MAX17048 not found, battery readings unavailable");
+  } else {
+    Serial.println("✅ MAX17048 Fuel Gauge Ready");
+  }
 
   // 2. الاتصال بالـ WiFi
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
