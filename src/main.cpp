@@ -2,9 +2,41 @@
 #include <HTTPClient.h>
 #include <Wire.h>
 #include <Adafruit_MPU6050.h>
-#include <Adafruit_MAX1704X.h>
 #include <ArduinoJson.h>
 #include "SparkFun_Bio_Sensor_Hub_Library.h"
+
+// MAX17048 raw I2C @ 0x36
+// The Adafruit library rejects this chip (VERSION register mismatch).
+// Raw I2C formulas are verified against live hardware register dump.
+#define MAX17048_ADDR  0x36
+#define MAX17048_VCELL 0x02  // 1 LSB = 78.125 µV
+#define MAX17048_SOC   0x04  // MSB = integer %, LSB/256 = fractional %
+#define MAX17048_MODE  0x06  // write 0x4000 for Quick Start
+
+// Returns 0xFFFF on I2C failure (device missing or removed)
+static uint16_t max17048_read(uint8_t reg) {
+  Wire.beginTransmission(MAX17048_ADDR);
+  Wire.write(reg);
+  if (Wire.endTransmission(false) != 0) return 0xFFFF;
+  if (Wire.requestFrom((uint8_t)MAX17048_ADDR, (uint8_t)2) != 2) return 0xFFFF;
+  return ((uint16_t)Wire.read() << 8) | Wire.read();
+}
+static void max17048_write(uint8_t reg, uint16_t val) {
+  Wire.beginTransmission(MAX17048_ADDR);
+  Wire.write(reg);
+  Wire.write((uint8_t)(val >> 8));
+  Wire.write((uint8_t)(val & 0xFF));
+  Wire.endTransmission();
+}
+// Returns false if chip not responding
+static bool max17048_read_batt(float &voltage, float &percent) {
+  uint16_t vcell = max17048_read(MAX17048_VCELL);
+  uint16_t soc   = max17048_read(MAX17048_SOC);
+  if (vcell == 0xFFFF || soc == 0xFFFF) return false;
+  voltage = vcell * 0.000078125f;
+  percent = (soc >> 8) + (float)(soc & 0xFF) / 256.0f;
+  return true;
+}
 
 // ===================== الإعدادات =====================
 const char *WIFI_SSID = "nadeen";
@@ -18,7 +50,6 @@ const char *FIREBASE_URL = "https://rakib-testing-default-rtdb.asia-southeast1.f
 #define BIO_MFIO_PIN 33
 // الكائنات
 Adafruit_MPU6050 mpu;
-Adafruit_MAX17048 maxlipo;
 SparkFun_Bio_Sensor_Hub bioHub(BIO_RST_PIN, BIO_MFIO_PIN);
 
 // متغيرات عالمية (Global)
@@ -62,8 +93,16 @@ void SensorTask(void *pvParameters)
 
     // 3. قراءة البطارية (MAX17048 Fuel Gauge)
     if (batteryFound) {
-      g_batt_v   = maxlipo.cellVoltage();
-      g_batt_pct = (int)maxlipo.cellPercent();
+      float v, pct;
+      if (max17048_read_batt(v, pct)) {
+        g_batt_v   = v;
+        g_batt_pct = constrain((int)pct, 0, 100);
+      } else {
+        // chip removed or bus error — stop reading until next reboot
+        batteryFound = false;
+        g_batt_v   = 0.0f;
+        g_batt_pct = 0;
+      }
     }
 
     delay(20); // تردد قراءة 50Hz كافٍ جداً للحساسات
@@ -150,37 +189,21 @@ void UploadTask(void *pvParameters)
 void setup()
 {
   Serial.begin(115200);
-  // Start I2C at 100kHz — MAX17048 needs this for reliable init
   Wire.begin(SDA_PIN, SCL_PIN);
-  delay(500);  // let power rails and bus settle on cold boot
-  Serial.println("Scanning I2C...");
+  delay(500);  // let power rails settle on cold boot
 
-  for (int addr = 1; addr < 127; addr++) {
-    Wire.beginTransmission(addr);
-    if (Wire.endTransmission() == 0) {
-      Serial.print("Device found at 0x");
-      Serial.println(addr, HEX);
-    }
-  }
-
-
-  // 1. MAX17048 FIRST, at 100kHz, before anything else touches the I2C bus.
-  //    Retry up to 5 times — the chip can be slow to ACK on fresh power-on.
-  for (int attempt = 1; attempt <= 100 && !batteryFound; attempt++) {
-    batteryFound = maxlipo.begin();
-    if (!batteryFound) {
-      Serial.printf("MAX17048 attempt %d/100 failed, retrying...\n", attempt);
-      delay(200);
-    }
-  }
+  // 1. MAX17048 — raw ACK check at 0x36, then Quick Start
+  Wire.beginTransmission(MAX17048_ADDR);
+  batteryFound = (Wire.endTransmission() == 0);
   if (!batteryFound) {
-    Serial.println("WARNING: MAX17048 not found at 0x36 after 5 attempts");
+    Serial.println("WARNING: MAX17048 not found at 0x36");
   } else {
-    maxlipo.quickStart();  // recalibrate SOC from OCV on startup
+    max17048_write(MAX17048_MODE, 0x4000);  // Quick Start: recalibrate SOC from OCV
+    delay(200);
     Serial.println("✅ MAX17048 Fuel Gauge Ready");
   }
 
-  // Now raise clock to 400kHz for the other sensors
+  // Raise clock to 400kHz for MPU6050 and Bio Hub
   Wire.setClock(400000);
 
   // 2. تهيئة باقي الحساسات
