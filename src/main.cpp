@@ -150,10 +150,23 @@ void UploadTask(void *pvParameters)
 void setup()
 {
   Serial.begin(115200);
+  // Start I2C at 100kHz (default) — MAX17048 needs this for reliable init
   Wire.begin(SDA_PIN, SCL_PIN);
+  delay(100);  // let bus settle before first transaction
+
+  // 1. MAX17048 FIRST, at 100kHz, before anything touches the I2C bus
+  batteryFound = maxlipo.begin();
+  if (!batteryFound) {
+    Serial.println("WARNING: MAX17048 not found at 0x36");
+  } else {
+    maxlipo.quickStart();  // recalibrate SOC from OCV on startup
+    Serial.println("✅ MAX17048 Fuel Gauge Ready");
+  }
+
+  // Now raise clock to 400kHz for the other sensors
   Wire.setClock(400000);
 
-  // 1. تهيئة الحساسات
+  // 2. تهيئة باقي الحساسات
   if (!mpu.begin())
   {
     Serial.println("Failed to find MPU6050 chip");
@@ -161,15 +174,6 @@ void setup()
     {
       delay(10);
     }
-  }
-
-  // تهيئة MAX17048 قبل Bio Hub — لأن bioHub.begin() يعيد تشغيل I2C عبر RST pin
-  batteryFound = maxlipo.begin();
-  if (!batteryFound) {
-    Serial.println("WARNING: MAX17048 not found at 0x36");
-  } else {
-    maxlipo.quickStart();  // recalibrate SOC from OCV on startup
-    Serial.println("✅ MAX17048 Fuel Gauge Ready");
   }
 
   if (bioHub.begin() == 0)
