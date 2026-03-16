@@ -150,14 +150,31 @@ void UploadTask(void *pvParameters)
 void setup()
 {
   Serial.begin(115200);
-  // Start I2C at 100kHz (default) — MAX17048 needs this for reliable init
+  // Start I2C at 100kHz — MAX17048 needs this for reliable init
   Wire.begin(SDA_PIN, SCL_PIN);
-  delay(100);  // let bus settle before first transaction
+  delay(500);  // let power rails and bus settle on cold boot
+  Serial.println("Scanning I2C...");
 
-  // 1. MAX17048 FIRST, at 100kHz, before anything touches the I2C bus
-  batteryFound = maxlipo.begin();
+  for (int addr = 1; addr < 127; addr++) {
+    Wire.beginTransmission(addr);
+    if (Wire.endTransmission() == 0) {
+      Serial.print("Device found at 0x");
+      Serial.println(addr, HEX);
+    }
+  }
+
+
+  // 1. MAX17048 FIRST, at 100kHz, before anything else touches the I2C bus.
+  //    Retry up to 5 times — the chip can be slow to ACK on fresh power-on.
+  for (int attempt = 1; attempt <= 100 && !batteryFound; attempt++) {
+    batteryFound = maxlipo.begin();
+    if (!batteryFound) {
+      Serial.printf("MAX17048 attempt %d/100 failed, retrying...\n", attempt);
+      delay(200);
+    }
+  }
   if (!batteryFound) {
-    Serial.println("WARNING: MAX17048 not found at 0x36");
+    Serial.println("WARNING: MAX17048 not found at 0x36 after 5 attempts");
   } else {
     maxlipo.quickStart();  // recalibrate SOC from OCV on startup
     Serial.println("✅ MAX17048 Fuel Gauge Ready");
