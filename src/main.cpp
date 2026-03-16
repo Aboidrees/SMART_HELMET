@@ -162,21 +162,22 @@ void setup()
       delay(10);
     }
   }
-  if (bioHub.begin() == 0)
-  {
-    bioHub.configSensorBpm(MODE_TWO);
-    bioHub.setPulseWidth(411);
-    bioHub.setAdcRange(4096);
-    Serial.println("✅ Sensors Initialized");
-  }
 
-  // تهيئة MAX17048 Fuel Gauge @ 0x36
+  // تهيئة MAX17048 قبل Bio Hub — لأن bioHub.begin() يعيد تشغيل I2C عبر RST pin
   batteryFound = maxlipo.begin();
   if (!batteryFound) {
     Serial.println("WARNING: MAX17048 not found at 0x36");
   } else {
     maxlipo.quickStart();  // recalibrate SOC from OCV on startup
     Serial.println("✅ MAX17048 Fuel Gauge Ready");
+  }
+
+  if (bioHub.begin() == 0)
+  {
+    bioHub.configSensorBpm(MODE_TWO);
+    bioHub.setPulseWidth(411);
+    bioHub.setAdcRange(4096);
+    Serial.println("✅ Sensors Initialized");
   }
 
   // 2. الاتصال بالـ WiFi
