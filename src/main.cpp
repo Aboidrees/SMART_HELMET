@@ -13,6 +13,13 @@
 #define MAX17048_SOC   0x04  // MSB = integer %, LSB/256 = fractional %
 #define MAX17048_MODE  0x06  // write 0x4000 for Quick Start
 
+// الأقطاب (Pins)
+#define SDA_PIN 21
+#define SCL_PIN 22
+#define BIO_RST_PIN 25
+#define BIO_MFIO_PIN 33
+#define BUZZER_PIN 12
+
 // Returns 0xFFFF on I2C failure (device missing or removed)
 static uint16_t max17048_read(uint8_t reg) {
   Wire.beginTransmission(MAX17048_ADDR);
@@ -38,16 +45,21 @@ static bool max17048_read_batt(float &voltage, float &percent) {
   return true;
 }
 
+// Simple beep function
+static void beep(int count = 1, int duration = 100, int pause = 150) {
+  for (int i = 0; i < count; i++) {
+    digitalWrite(BUZZER_PIN, HIGH);
+    delay(duration);
+    digitalWrite(BUZZER_PIN, LOW);
+    if (i < count - 1) delay(pause);
+  }
+}
+
 // ===================== الإعدادات =====================
 const char *WIFI_SSID = "nadeen";
 const char *WIFI_PASSWORD = "12345689";
 const char *FIREBASE_URL = "https://rakib-testing-default-rtdb.asia-southeast1.firebasedatabase.app/testData";
 
-// الأقطاب (Pins)
-#define SDA_PIN 21
-#define SCL_PIN 22
-#define BIO_RST_PIN 25
-#define BIO_MFIO_PIN 33
 // الكائنات
 Adafruit_MPU6050 mpu;
 SparkFun_Bio_Sensor_Hub bioHub(BIO_RST_PIN, BIO_MFIO_PIN);
@@ -215,6 +227,8 @@ void UploadTask(void *pvParameters)
 void setup()
 {
   Serial.begin(115200);
+  pinMode(BUZZER_PIN, OUTPUT);
+  digitalWrite(BUZZER_PIN, LOW);
   Wire.begin(SDA_PIN, SCL_PIN);
   delay(500);  // let power rails settle on cold boot
 
@@ -261,8 +275,9 @@ void setup()
   // المهمة الثانية: الرفع للإنترنت (أولوية منخفضة على النواة 1)
   xTaskCreatePinnedToCore(UploadTask, "UploadTask", 8192, NULL, 1, &UploadTaskHandle, 1);
 
-  Serial.println("✅ Logging Started (WiFi connecting in background)");
-}
+  Serial.println("✅ Logging Started (WiFi connecting in background)");  
+  // Startup beep notification
+  beep(2, 150, 200);}
 
 void loop()
 {
