@@ -111,8 +111,32 @@ void SensorTask(void *pvParameters)
 // ===================== وظيفة الرفع للإنترنت (Core 1) =====================
 void UploadTask(void *pvParameters)
 {
+  // Try to connect to WiFi on startup
+  unsigned long wifiRetryTime = 0;
+  const unsigned long WIFI_RETRY_INTERVAL = 5000;  // Retry every 5 seconds
+  bool wifiInitStarted = false;
+
   for (;;)
   {
+    // Auto-reconnect WiFi if disconnected
+    if (WiFi.status() != WL_CONNECTED) {
+      unsigned long now = millis();
+      if (now - wifiRetryTime > WIFI_RETRY_INTERVAL) {
+        wifiRetryTime = now;
+        if (WiFi.status() == WL_IDLE_STATUS || WiFi.status() == WL_DISCONNECTED) {
+          if (!wifiInitStarted) {
+            Serial.println("[WiFi] Starting connection attempt...");
+            wifiInitStarted = true;
+          }
+          WiFi.setTxPower(WIFI_POWER_5dBm);  // Lower TX power to reduce current draw
+          WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+        }
+      }
+    } else if (WiFi.status() == WL_CONNECTED && wifiInitStarted) {
+      Serial.println("✅ WiFi Connected");
+      wifiInitStarted = false;
+    }
+
     if (WiFi.status() == WL_CONNECTED)
     {
       HTTPClient http;
@@ -149,6 +173,7 @@ void UploadTask(void *pvParameters)
       http.end();
 
       // --- التعديل هنا لإظهار البيانات في الـ Console ---
+      Serial.print("[WiFi:OK] ");
       Serial.print("[IMU] ");
       Serial.print("AX=");
       Serial.print(g_ax);
@@ -178,6 +203,8 @@ void UploadTask(void *pvParameters)
       Serial.print("V)");
       Serial.print(" -> ");
       Serial.println(httpCode);
+    } else {
+      Serial.println("[WiFi:DISCONNECTED] (skipping upload)");
     }
 
     delay(uploadInterval);
@@ -223,15 +250,9 @@ void setup()
     Serial.println("✅ Sensors Initialized");
   }
 
-  // 2. الاتصال بالـ WiFi
-  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-  Serial.print("Connecting WiFi");
-  while (WiFi.status() != WL_CONNECTED)
-  {
-    delay(500);
-    Serial.print(".");
-  }
-  Serial.println("\n✅ WiFi Connected");
+  // 2. الاتصال بالـ WiFi (moved to UploadTask to avoid blocking)
+  WiFi.mode(WIFI_STA);
+  Serial.println("WiFi config initialized (connection will start in background);");
 
   // 3. إنشاء المهام وتوزيعها على الأنوية
   // المهمة الأولى: قراءة الحساسات (أولوية عالية على النواة 0)
@@ -240,7 +261,7 @@ void setup()
   // المهمة الثانية: الرفع للإنترنت (أولوية منخفضة على النواة 1)
   xTaskCreatePinnedToCore(UploadTask, "UploadTask", 8192, NULL, 1, &UploadTaskHandle, 1);
 
-  Serial.println("✅ Logging Started");
+  Serial.println("✅ Logging Started (WiFi connecting in background)");
 }
 
 void loop()
