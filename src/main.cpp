@@ -130,6 +130,10 @@ void UploadTask(void *pvParameters)
   const unsigned long WIFI_RETRY_INTERVAL = 5000;  // Retry every 5 seconds
   bool wifiInitStarted = false;
 
+  // Create secure client once, reuse every upload
+  WiFiClientSecure client;
+  client.setInsecure();  // Skip SSL cert verification (fine for Firebase)
+
   for (;;)
   {
     // Auto-reconnect WiFi if disconnected (handles all disconnect states)
@@ -142,7 +146,7 @@ void UploadTask(void *pvParameters)
         Serial.println(" - reconnecting...");
         WiFi.disconnect(true);
         delay(100);
-        WiFi.setTxPower(WIFI_POWER_5dBm);  // Lower TX power to reduce current draw
+        WiFi.setTxPower(WIFI_POWER_7dBm);  // Balanced TX power for stability
         WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
         wifiInitStarted = true;
       }
@@ -154,14 +158,12 @@ void UploadTask(void *pvParameters)
 
     if (WiFi.status() == WL_CONNECTED)
     {
-      WiFiClientSecure client;
-      client.setInsecure();  // Skip SSL cert verification (fine for Firebase)
       HTTPClient http;
       String url = String(FIREBASE_URL) + "/" + currentTestName + "/log.json";
 
       http.begin(client, url);
       http.addHeader("Content-Type", "application/json");
-      http.setTimeout(1500);
+      http.setTimeout(8000);  // SSL handshake on ESP32 takes 2-4s
 
       JsonDocument doc;
       doc["time"] = millis();
@@ -279,7 +281,7 @@ void setup()
   xTaskCreatePinnedToCore(SensorTask, "SensorTask", 4096, NULL, 3, &SensorTaskHandle, 0);
 
   // المهمة الثانية: الرفع للإنترنت (أولوية منخفضة على النواة 1)
-  xTaskCreatePinnedToCore(UploadTask, "UploadTask", 8192, NULL, 1, &UploadTaskHandle, 1);
+  xTaskCreatePinnedToCore(UploadTask, "UploadTask", 16384, NULL, 1, &UploadTaskHandle, 1);
 
   Serial.println("✅ Logging Started (WiFi connecting in background)");  
   // Startup beep notification
