@@ -1,4 +1,5 @@
 #include <WiFi.h>
+#include <WiFiClientSecure.h>
 #include <HTTPClient.h>
 #include <Wire.h>
 #include <Adafruit_MPU6050.h>
@@ -153,10 +154,12 @@ void UploadTask(void *pvParameters)
 
     if (WiFi.status() == WL_CONNECTED)
     {
+      WiFiClientSecure client;
+      client.setInsecure();  // Skip SSL cert verification (fine for Firebase)
       HTTPClient http;
       String url = String(FIREBASE_URL) + "/" + currentTestName + "/log.json";
 
-      http.begin(url);
+      http.begin(client, url);
       http.addHeader("Content-Type", "application/json");
       http.setTimeout(1500);
 
