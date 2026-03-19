@@ -19,6 +19,7 @@
 #define BIO_RST_PIN 25
 #define BIO_MFIO_PIN 33
 #define BUZZER_PIN 12
+#define BUTTON_PIN 32
 
 // Returns 0xFFFF on I2C failure (device missing or removed)
 static uint16_t max17048_read(uint8_t reg) {
@@ -229,6 +230,7 @@ void setup()
   Serial.begin(115200);
   pinMode(BUZZER_PIN, OUTPUT);
   digitalWrite(BUZZER_PIN, LOW);
+  pinMode(BUTTON_PIN, INPUT_PULLDOWN);  // active HIGH: pressed = HIGH
   Wire.begin(SDA_PIN, SCL_PIN);
   delay(500);  // let power rails settle on cold boot
 
@@ -281,5 +283,17 @@ void setup()
 
 void loop()
 {
+  // Button: start new test on press (increments Firebase path)
+  static bool lastButtonState = false;
+  bool buttonPressed = (digitalRead(BUTTON_PIN) == HIGH);
+  if (buttonPressed && !lastButtonState) {
+    int num = currentTestName.substring(5).toInt() + 1;
+    currentTestName = "test_" + String(num);
+    Serial.print(">>> NEW TEST: ");
+    Serial.println(currentTestName);
+    beep(1, 100);  // single beep to confirm
+  }
+  lastButtonState = buttonPressed;
+
   delay(1000);
 }

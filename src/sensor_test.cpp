@@ -14,6 +14,7 @@
 #define BIO_RST_PIN 25
 #define BIO_MFIO_PIN 33
 #define BUZZER_PIN 12
+#define BUTTON_PIN 32
 
 // Returns 0xFFFF on I2C failure (device missing or removed)
 static uint16_t max17048_read(uint8_t reg) {
@@ -64,12 +65,14 @@ volatile float g_batt_v;
 volatile int g_batt_pct;
 
 bool batteryFound = false;
+unsigned int testNumber = 1;
 
 void setup()
 {
   Serial.begin(115200);
   pinMode(BUZZER_PIN, OUTPUT);
   digitalWrite(BUZZER_PIN, LOW);
+  pinMode(BUTTON_PIN, INPUT_PULLDOWN);  // active HIGH: pressed = HIGH
   delay(1000);
   
   Serial.println("\n========== SENSOR TEST (NO WiFi) ==========");
@@ -179,4 +182,17 @@ void loop()
   }
 
   delay(20);  // 50Hz sensor read rate
+
+  // Button: start new test on press
+  static bool lastButtonState = false;
+  bool buttonPressed = (digitalRead(BUTTON_PIN) == HIGH);
+  if (buttonPressed && !lastButtonState) {
+    testNumber++;
+    Serial.println();
+    Serial.print(">>> NEW TEST STARTED: test_");
+    Serial.println(testNumber);
+    Serial.println();
+    beep(1, 100);  // single beep to confirm
+  }
+  lastButtonState = buttonPressed;
 }
