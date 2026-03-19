@@ -131,22 +131,23 @@ void UploadTask(void *pvParameters)
 
   for (;;)
   {
-    // Auto-reconnect WiFi if disconnected
+    // Auto-reconnect WiFi if disconnected (handles all disconnect states)
     if (WiFi.status() != WL_CONNECTED) {
       unsigned long now = millis();
       if (now - wifiRetryTime > WIFI_RETRY_INTERVAL) {
         wifiRetryTime = now;
-        if (WiFi.status() == WL_IDLE_STATUS || WiFi.status() == WL_DISCONNECTED) {
-          if (!wifiInitStarted) {
-            Serial.println("[WiFi] Starting connection attempt...");
-            wifiInitStarted = true;
-          }
-          WiFi.setTxPower(WIFI_POWER_5dBm);  // Lower TX power to reduce current draw
-          WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-        }
+        Serial.print("[WiFi] Status: ");
+        Serial.print(WiFi.status());
+        Serial.println(" - reconnecting...");
+        WiFi.disconnect(true);
+        delay(100);
+        WiFi.setTxPower(WIFI_POWER_5dBm);  // Lower TX power to reduce current draw
+        WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+        wifiInitStarted = true;
       }
     } else if (WiFi.status() == WL_CONNECTED && wifiInitStarted) {
-      Serial.println("✅ WiFi Connected");
+      Serial.print("✅ WiFi Connected IP: ");
+      Serial.println(WiFi.localIP());
       wifiInitStarted = false;
     }
 
