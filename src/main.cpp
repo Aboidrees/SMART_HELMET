@@ -5,6 +5,10 @@
 #include <Adafruit_MPU6050.h>
 #include <ArduinoJson.h>
 #include "SparkFun_Bio_Sensor_Hub_Library.h"
+#include "soc/soc.h"
+#include "soc/rtc_cntl_reg.h"
+#include "soc/timer_group_reg.h"
+#include "esp_task_wdt.h"
 
 // MAX17048 raw I2C @ 0x36
 // The Adafruit library rejects this chip (VERSION register mismatch).
@@ -58,9 +62,9 @@ static void beep(int count = 1, int duration = 100, int pause = 150) {
 }
 
 // ===================== الإعدادات =====================
-const char *WIFI_SSID = "nadeen";
-const char *WIFI_PASSWORD = "12345689";
-const char *FIREBASE_URL = "https://rakib-testing-default-rtdb.asia-southeast1.firebasedatabase.app/testData";
+const char *WIFI_SSID = "aboidrees";
+const char *WIFI_PASSWORD = "@bo!dree$";
+const char *FIREBASE_URL = "https://rakib-testing-default-rtdb.asia-southeast1.firebasedatabase.app/wifi_test";
 
 // الكائنات
 Adafruit_MPU6050 mpu;
@@ -74,7 +78,7 @@ volatile float g_batt_v;
 volatile int g_batt_pct;
 
 String currentTestName = "test_1";
-unsigned long uploadInterval = 2000;
+unsigned long uploadInterval = 10000;
 bool batteryFound = false;
 
 TaskHandle_t SensorTaskHandle;
@@ -164,6 +168,7 @@ void UploadTask(void *pvParameters)
       http.begin(client, url);
       http.addHeader("Content-Type", "application/json");
       http.setTimeout(8000);  // SSL handshake on ESP32 takes 2-4s
+      http.setReuse(true);    // keep TCP connection alive — avoids SSL re-handshake every upload
 
       JsonDocument doc;
       doc["time"] = millis();
@@ -190,6 +195,17 @@ void UploadTask(void *pvParameters)
 
       int httpCode = http.POST(json);
       http.end();
+
+      // If upload failed, force WiFi reconnect to clear corrupted radio state
+      // (happens on battery/powerbank due to voltage sag during TX spike)
+      if (httpCode <= 0) {
+        Serial.print("[WiFi] Upload failed (");
+        Serial.print(httpCode);
+        Serial.println(") - forcing reconnect to reset radio state");
+        WiFi.disconnect(true);
+        delay(200);
+        wifiRetryTime = 0;  // trigger immediate reconnect on next iteration
+      }
 
       // --- التعديل هنا لإظهار البيانات في الـ Console ---
       Serial.print("[WiFi:OK] ");
@@ -233,11 +249,21 @@ void UploadTask(void *pvParameters)
 // ===================== الإعدادات (Setup) =====================
 void setup()
 {
+  WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0);  // disable brownout detector
+  // Disable TG0 (Task WDT) and TG1 (Interrupt WDT) via hardware registers.
+  // esp_task_wdt_deinit() is unreliable when IDLE tasks are still registered.
+  WRITE_PERI_REG(TIMG_WDTWPROTECT_REG(0), TIMG_WDT_WKEY_VALUE);
+  WRITE_PERI_REG(TIMG_WDTCONFIG0_REG(0),  0);  // TG0WDT off
+  WRITE_PERI_REG(TIMG_WDTWPROTECT_REG(0), 0);
+  WRITE_PERI_REG(TIMG_WDTWPROTECT_REG(1), TIMG_WDT_WKEY_VALUE);
+  WRITE_PERI_REG(TIMG_WDTCONFIG0_REG(1),  0);  // TG1WDT off
+  WRITE_PERI_REG(TIMG_WDTWPROTECT_REG(1), 0);
   Serial.begin(115200);
   pinMode(BUZZER_PIN, OUTPUT);
   digitalWrite(BUZZER_PIN, LOW);
   pinMode(BUTTON_PIN, INPUT_PULLDOWN);  // active HIGH: pressed = HIGH
   Wire.begin(SDA_PIN, SCL_PIN);
+  Wire.setTimeOut(1000);  // 1s I2C timeout — prevents bio hub stall from blocking interrupts >300ms and triggering TG1WDT
   delay(500);  // let power rails settle on cold boot
 
   // 1. MAX17048 — raw ACK check at 0x36, then Quick Start
@@ -274,11 +300,19 @@ void setup()
 
   // 2. الاتصال بالـ WiFi (moved to UploadTask to avoid blocking)
   WiFi.mode(WIFI_STA);
+  // WiFi.mode() calls esp_wifi_init() internally, which re-enables the Task WDT.
+  // Re-apply hardware register disables to override this before tasks start.
+  WRITE_PERI_REG(TIMG_WDTWPROTECT_REG(0), TIMG_WDT_WKEY_VALUE);
+  WRITE_PERI_REG(TIMG_WDTCONFIG0_REG(0),  0);
+  WRITE_PERI_REG(TIMG_WDTWPROTECT_REG(0), 0);
+  WRITE_PERI_REG(TIMG_WDTWPROTECT_REG(1), TIMG_WDT_WKEY_VALUE);
+  WRITE_PERI_REG(TIMG_WDTCONFIG0_REG(1),  0);
+  WRITE_PERI_REG(TIMG_WDTWPROTECT_REG(1), 0);
   Serial.println("WiFi config initialized (connection will start in background);");
 
   // 3. إنشاء المهام وتوزيعها على الأنوية
   // المهمة الأولى: قراءة الحساسات (أولوية عالية على النواة 0)
-  xTaskCreatePinnedToCore(SensorTask, "SensorTask", 4096, NULL, 3, &SensorTaskHandle, 0);
+  xTaskCreatePinnedToCore(SensorTask, "SensorTask", 4096, NULL, 1, &SensorTaskHandle, 0);
 
   // المهمة الثانية: الرفع للإنترنت (أولوية منخفضة على النواة 1)
   xTaskCreatePinnedToCore(UploadTask, "UploadTask", 16384, NULL, 1, &UploadTaskHandle, 1);
